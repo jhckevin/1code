@@ -62,6 +62,8 @@ import {
   hiddenModelsAtom,
   normalizeCodexApiKey,
   normalizeCustomClaudeConfig,
+  normalizeOpenCodexBackendConfig,
+  openCodexBackendConfigAtom,
   showOfflineModeFeaturesAtom,
   selectedOllamaModelAtom,
   customHotkeysAtom,
@@ -123,6 +125,7 @@ import {
   CODEX_MODELS,
   type CodexThinkingLevel,
 } from "../lib/models"
+import { getOpenCodexProviderLabel } from "../lib/opencodex-runtime"
 // import type { PlanType } from "@/lib/config/subscription-plans"
 type PlanType = string
 
@@ -166,9 +169,13 @@ function useAvailableModels() {
 
 // Agent providers
 const agents = [
-  { id: "claude-code", name: "Claude Code", hasModels: true },
+  {
+    id: "claude-code",
+    name: getOpenCodexProviderLabel("claude-code"),
+    hasModels: true,
+  },
   { id: "cursor", name: "Cursor CLI", disabled: true },
-  { id: "codex", name: "OpenAI Codex" },
+  { id: "codex", name: getOpenCodexProviderLabel("codex") },
 ]
 
 interface NewChatFormProps {
@@ -244,10 +251,13 @@ export function NewChatForm({
   const anthropicOnboardingCompleted = useAtomValue(anthropicOnboardingCompletedAtom)
   const apiKeyOnboardingCompleted = useAtomValue(apiKeyOnboardingCompletedAtom)
   const codexOnboardingCompleted = useAtomValue(codexOnboardingCompletedAtom)
-  const { data: claudeCodeIntegration } =
-    trpc.claudeCode.getIntegration.useQuery()
+  const backendConfig = useAtomValue(openCodexBackendConfigAtom)
+  const normalizedBackendConfig = useMemo(
+    () => normalizeOpenCodexBackendConfig(backendConfig),
+    [backendConfig],
+  )
   const isClaudeConnected =
-    Boolean(claudeCodeIntegration?.isConnected) ||
+    Boolean(normalizedBackendConfig) ||
     anthropicOnboardingCompleted ||
     apiKeyOnboardingCompleted ||
     hasCustomClaudeConfig
@@ -423,7 +433,7 @@ export function NewChatForm({
     }
 
     if (hasCustomClaudeConfig) {
-      return "Custom Model"
+      return "Backend Override"
     }
 
     if (!selectedModel) {
@@ -2239,3 +2249,4 @@ export function NewChatForm({
     </div>
   )
 }
+

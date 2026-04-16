@@ -73,16 +73,9 @@ export {
   AGENT_MODES,
   getNextMode,
 
-  // Desktop view navigation (Automations / Inbox)
+  // Desktop view navigation
   desktopViewAtom,
-  automationDetailIdAtom,
-  automationTemplateParamsAtom,
-  inboxSelectedChatIdAtom,
-  agentsInboxSidebarWidthAtom,
-  inboxMobileViewModeAtom,
   type DesktopView,
-  type AutomationTemplateParams,
-  type InboxMobileViewMode,
 } from "../../features/agents/atoms"
 
 // ============================================
@@ -210,6 +203,18 @@ export type CustomClaudeConfig = {
   baseUrl: string
 }
 
+export type OpenCodexBackendProviderFamily =
+  | "openai-compatible"
+  | "anthropic-compatible"
+  | "custom"
+
+export type OpenCodexBackendConfig = {
+  providerFamily: OpenCodexBackendProviderFamily
+  baseUrl: string
+  model: string
+  apiKey: string
+}
+
 // Model profile system - support multiple configs
 export type ModelProfile = {
   id: string
@@ -323,6 +328,38 @@ export function normalizeCustomClaudeConfig(
   if (!model || !token || !baseUrl) return undefined
 
   return { model, token, baseUrl }
+}
+
+export function normalizeOpenCodexBackendConfig(
+  config: OpenCodexBackendConfig,
+): OpenCodexBackendConfig | undefined {
+  const providerFamily = config.providerFamily
+  const baseUrl = config.baseUrl.trim()
+  const model = config.model.trim()
+  const apiKey = config.apiKey.trim()
+
+  if (!baseUrl || !model || !apiKey) return undefined
+
+  if (
+    providerFamily === "openai-compatible" &&
+    !normalizeCodexApiKey(apiKey)
+  ) {
+    return undefined
+  }
+
+  if (
+    providerFamily === "anthropic-compatible" &&
+    !(apiKey.startsWith("sk-ant-") && apiKey.length > 20)
+  ) {
+    return undefined
+  }
+
+  return {
+    providerFamily,
+    baseUrl,
+    model,
+    apiKey,
+  }
 }
 
 // Get active config (considering network status and auto-fallback)
@@ -441,15 +478,6 @@ export const betaGitFeaturesEnabledAtom = atomWithStorage<boolean>(
 export const betaKanbanEnabledAtom = atomWithStorage<boolean>(
   "preferences:beta-kanban-enabled",
   true, // Default ON — graduated from beta
-  undefined,
-  { getOnInit: true },
-)
-
-// Beta: Enable Automations & Inbox
-// When enabled, shows Automations and Inbox navigation in sidebar
-export const betaAutomationsEnabledAtom = atomWithStorage<boolean>(
-  "preferences:beta-automations-enabled",
-  false, // Default OFF
   undefined,
   { getOnInit: true },
 )
@@ -661,20 +689,6 @@ export const customHotkeysAtom = atomWithStorage<CustomHotkeysConfig>(
  */
 export const recordingHotkeyForActionAtom = atom<string | null>(null)
 
-// Login modal (shown when Claude Code auth fails)
-export const agentsLoginModalOpenAtom = atom<boolean>(false)
-export const codexLoginModalOpenAtom = atom<boolean>(false)
-
-export type ClaudeLoginModalConfig = {
-  hideCustomModelSettingsLink: boolean
-  autoStartAuth: boolean
-}
-
-export const claudeLoginModalConfigAtom = atom<ClaudeLoginModalConfig>({
-  hideCustomModelSettingsLink: false,
-  autoStartAuth: false,
-})
-
 // Help popover
 export const agentsHelpPopoverOpenAtom = atom<boolean>(false)
 
@@ -762,6 +776,19 @@ export const billingMethodAtom = atomWithStorage<BillingMethod>(
   undefined,
   { getOnInit: true },
 )
+
+export const openCodexBackendConfigAtom =
+  atomWithStorage<OpenCodexBackendConfig>(
+    "opencodex:backend-config",
+    {
+      providerFamily: "openai-compatible",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-5.2",
+      apiKey: "",
+    },
+    undefined,
+    { getOnInit: true },
+  )
 
 // Whether user has completed Anthropic OAuth during onboarding
 // This is used to show the onboarding screen after 21st.dev sign-in

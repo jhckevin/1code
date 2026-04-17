@@ -7,30 +7,59 @@ import { Button } from "../../components/ui/button"
 import { Input } from "../../components/ui/input"
 import { Label } from "../../components/ui/label"
 import { Logo } from "../../components/ui/logo"
-import type {
-  OpenCodexBackendConfig,
-  OpenCodexBackendProviderFamily,
-} from "../../lib/atoms"
+import type { OpenCodexBackendConfig } from "../../lib/atoms"
 import { normalizeOpenCodexBackendConfig } from "../../lib/atoms"
 import { cn } from "../../lib/utils"
+import {
+  getOpenCodexBackendRouteTitle,
+  openCodexBackendRouteRequiresHost,
+  type OpenCodexBackendProviderFamily,
+  type OpenCodexBackendRouteKind,
+} from "../../../shared/opencodex-backend-route"
 import { getOpenCodexBackendTemplate } from "./opencodex-backend-config"
 
-const PROVIDER_OPTIONS = [
+const ROUTE_OPTIONS = [
+  {
+    id: "codex-subscription",
+    title: "Codex Subscription",
+    description: "Reuse the machine's local Codex-authenticated session bridge.",
+  },
+  {
+    id: "claude-subscription",
+    title: "Claude Subscription",
+    description: "Reuse the machine's local Claude-authenticated session bridge.",
+  },
+  {
+    id: "openai-compatible-api",
+    title: "OpenAI-Compatible API",
+    description: "Route OpenCodex through an OpenAI-compatible API target.",
+  },
+  {
+    id: "anthropic-compatible-api",
+    title: "Anthropic-Compatible API",
+    description: "Route OpenCodex through an Anthropic-compatible API target.",
+  },
+  {
+    id: "custom-endpoint",
+    title: "Custom Endpoint",
+    description: "Use a custom local or remote endpoint with an explicit provider family.",
+  },
+] as const satisfies ReadonlyArray<{
+  id: OpenCodexBackendRouteKind
+  title: string
+  description: string
+}>
+
+const CUSTOM_PROVIDER_OPTIONS = [
   {
     id: "openai-compatible",
     title: "OpenAI-Compatible",
-    description: "Route OpenCodex through an OpenAI-compatible API target.",
+    description: "Custom endpoint with OpenAI-style request semantics.",
   },
   {
     id: "anthropic-compatible",
     title: "Anthropic-Compatible",
-    description: "Route OpenCodex through an Anthropic-compatible API target.",
-  },
-  {
-    id: "custom",
-    title: "Custom Endpoint",
-    description:
-      "Route OpenCodex through a custom local or remote OpenAI-style endpoint.",
+    description: "Custom endpoint with Anthropic-style request semantics.",
   },
 ] as const satisfies ReadonlyArray<{
   id: OpenCodexBackendProviderFamily
@@ -39,6 +68,10 @@ const PROVIDER_OPTIONS = [
 }>
 
 type OpenCodexBackendEditorVariant = "onboarding" | "settings"
+
+type OpenCodexBackendHostState = Awaited<
+  ReturnType<Window["desktopApi"]["getBackendHostState"]>
+>
 
 type OpenCodexBackendEditorProps = {
   variant: OpenCodexBackendEditorVariant
@@ -97,6 +130,13 @@ export function OpenCodexBackendEditor({
     [draft],
   )
 
+  const routeNeedsEndpointFields =
+    draft.kind === "openai-compatible-api" ||
+    draft.kind === "anthropic-compatible-api" ||
+    draft.kind === "custom-endpoint"
+
+  const routeRequiresHost = openCodexBackendRouteRequiresHost(draft)
+
   const refreshHostState = async () => {
     setIsRefreshingHostState(true)
     try {
@@ -120,29 +160,63 @@ export function OpenCodexBackendEditor({
   }, [])
 
   const updateField = (
-    field: keyof Pick<OpenCodexBackendConfig, "baseUrl" | "model" | "apiKey">,
+    field: "baseUrl" | "model" | "apiKey",
     value: string,
   ) => {
     setError(null)
-    setDraft((current) => ({
-      ...current,
-      [field]: value,
-    }))
+    setDraft((current: OpenCodexBackendConfig) => {
+      if (!(field in current)) {
+        return current
+      }
+      return {
+        ...current,
+        [field]: value,
+      } as OpenCodexBackendConfig
+    })
   }
 
-  const updateProvider = (providerFamily: OpenCodexBackendProviderFamily) => {
+  const updateRouteKind = (kind: OpenCodexBackendRouteKind) => {
     setError(null)
-    setDraft((current) => ({
-      ...getOpenCodexBackendTemplate(providerFamily),
-      apiKey:
-        current.providerFamily === providerFamily ? current.apiKey : "",
-    }))
+    setDraft((current: OpenCodexBackendConfig) => {
+      const next = getOpenCodexBackendTemplate(kind)
+      if ("apiKey" in next && "apiKey" in current && current.kind === kind) {
+        return {
+          ...next,
+          apiKey: current.apiKey,
+        }
+      }
+      if (kind === "custom-endpoint" && current.kind === "custom-endpoint") {
+        return {
+          ...next,
+          providerFamily: current.providerFamily,
+          apiKey: current.apiKey,
+        }
+      }
+      return next
+    })
+  }
+
+  const updateCustomProviderFamily = (
+    providerFamily: OpenCodexBackendProviderFamily,
+  ) => {
+    setError(null)
+    setDraft((current: OpenCodexBackendConfig) => {
+      if (current.kind !== "custom-endpoint") {
+        return current
+      }
+      return {
+        ...current,
+        providerFamily,
+      }
+    })
   }
 
   const applyBackendConfig = async () => {
     if (!normalizedConfig) {
       setError(
-        "Complete the backend base URL, model, and credential before applying the local backend route.",
+        routeNeedsEndpointFields
+          ? "Complete the route details and credential before applying this backend route."
+          : "Select a valid backend route before applying it.",
       )
       return
     }
@@ -155,7 +229,10 @@ export function OpenCodexBackendEditor({
       const nextHostState = await window.desktopApi.restartBackendHost()
       setHostState(nextHostState)
 
-      if (nextHostState.status !== "ready") {
+      if (
+        openCodexBackendRouteRequiresHost(normalizedConfig) &&
+        nextHostState.status !== "ready"
+      ) {
         setError(
           nextHostState.lastError ||
             "OpenCodex could not start the local backend host.",
@@ -183,7 +260,7 @@ export function OpenCodexBackendEditor({
       const nextHostState = await window.desktopApi.restartBackendHost()
       setHostState(nextHostState)
 
-      if (nextHostState.status !== "ready") {
+      if (routeRequiresHost && nextHostState.status !== "ready") {
         setError(
           nextHostState.lastError ||
             "OpenCodex could not restart the local backend host.",
@@ -211,6 +288,14 @@ export function OpenCodexBackendEditor({
       ? "space-y-5 rounded-2xl border border-border bg-card p-6 shadow-sm"
       : "space-y-5 rounded-2xl border border-border bg-card p-5 shadow-sm"
 
+  const credentialPlaceholder =
+    draft.kind === "anthropic-compatible-api" ||
+    (draft.kind === "custom-endpoint" && draft.providerFamily === "anthropic-compatible")
+      ? "sk-ant-..."
+      : "sk-..."
+
+  const routeSummary = getOpenCodexBackendRouteTitle(draft)
+
   return (
     <div className={cardClassName}>
       {variant === "onboarding" && (
@@ -227,8 +312,8 @@ export function OpenCodexBackendEditor({
             <h1 className="text-xl font-semibold tracking-tight">
               Configure OpenCodex Backend
             </h1>
-            <p className="mx-auto max-w-[460px] text-sm leading-6 text-muted-foreground">
-              Configure the local backend once, keep the APP-Server hidden behind
+            <p className="mx-auto max-w-[500px] text-sm leading-6 text-muted-foreground">
+              Choose one native backend route, keep the APP-Server hidden behind
               the desktop shell, and enter the workspace without any browser
               login flow.
             </p>
@@ -236,14 +321,14 @@ export function OpenCodexBackendEditor({
         </div>
       )}
 
-      <div className="grid gap-3 md:grid-cols-3">
-        {PROVIDER_OPTIONS.map((option) => {
-          const selected = draft.providerFamily === option.id
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {ROUTE_OPTIONS.map((option) => {
+          const selected = draft.kind === option.id
           return (
             <button
               key={option.id}
               type="button"
-              onClick={() => updateProvider(option.id)}
+              onClick={() => updateRouteKind(option.id)}
               className={cn(
                 "relative rounded-2xl border p-4 text-left transition-colors",
                 selected
@@ -265,48 +350,91 @@ export function OpenCodexBackendEditor({
         })}
       </div>
 
-      <div className="grid gap-2">
-        <Label htmlFor={`${variant}-backend-base-url`}>Base URL</Label>
-        <Input
-          id={`${variant}-backend-base-url`}
-          value={draft.baseUrl}
-          onChange={(event) => updateField("baseUrl", event.target.value)}
-          placeholder="https://api.openai.com/v1"
-        />
-      </div>
-
-      <div className="grid gap-2">
-        <Label htmlFor={`${variant}-backend-model`}>Model</Label>
-        <Input
-          id={`${variant}-backend-model`}
-          value={draft.model}
-          onChange={(event) => updateField("model", event.target.value)}
-          placeholder="gpt-5.2"
-        />
-      </div>
-
-      <div className="grid gap-2">
-        <Label htmlFor={`${variant}-backend-api-key`}>Credential</Label>
-        <div className="relative">
-          <Input
-            id={`${variant}-backend-api-key`}
-            type="password"
-            value={draft.apiKey}
-            onChange={(event) => updateField("apiKey", event.target.value)}
-            placeholder={
-              draft.providerFamily === "anthropic-compatible"
-                ? "sk-ant-..."
-                : "sk-..."
-            }
-            className="pr-10 font-mono"
-          />
-          <KeyRound className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      {draft.kind === "custom-endpoint" && (
+        <div className="space-y-3 rounded-xl border border-border bg-background/70 p-4">
+          <div>
+            <div className="text-sm font-medium">Custom Provider Family</div>
+            <div className="text-xs text-muted-foreground">
+              Pick the request semantics the custom endpoint expects.
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {CUSTOM_PROVIDER_OPTIONS.map((option) => {
+              const selected = draft.providerFamily === option.id
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => updateCustomProviderFamily(option.id)}
+                  className={cn(
+                    "rounded-xl border p-3 text-left transition-colors",
+                    selected
+                      ? "border-primary bg-primary/5 shadow-sm"
+                      : "border-border bg-card hover:border-foreground/20",
+                  )}
+                >
+                  <p className="text-sm font-medium">{option.title}</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    {option.description}
+                  </p>
+                </button>
+              )
+            })}
+          </div>
         </div>
-        <p className="text-xs leading-5 text-muted-foreground">
-          The frontend owns this setup. End users never need to see OpenHarness
-          terminals, Codex login windows, or Claude CLI prompts.
-        </p>
-      </div>
+      )}
+
+      {routeNeedsEndpointFields ? (
+        <>
+          <div className="grid gap-2">
+            <Label htmlFor={`${variant}-backend-base-url`}>Base URL</Label>
+            <Input
+              id={`${variant}-backend-base-url`}
+              value={"baseUrl" in draft ? draft.baseUrl : ""}
+              onChange={(event) => updateField("baseUrl", event.target.value)}
+              placeholder="https://api.openai.com/v1"
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor={`${variant}-backend-model`}>Model</Label>
+            <Input
+              id={`${variant}-backend-model`}
+              value={"model" in draft ? draft.model : ""}
+              onChange={(event) => updateField("model", event.target.value)}
+              placeholder="gpt-5.2"
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor={`${variant}-backend-api-key`}>Credential</Label>
+            <div className="relative">
+              <Input
+                id={`${variant}-backend-api-key`}
+                type="password"
+                value={"apiKey" in draft ? draft.apiKey : ""}
+                onChange={(event) => updateField("apiKey", event.target.value)}
+                placeholder={credentialPlaceholder}
+                className="pr-10 font-mono"
+              />
+              <KeyRound className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            </div>
+            <p className="text-xs leading-5 text-muted-foreground">
+              OpenCodex stores API-backed route credentials locally and never
+              requires the user to open OpenHarness terminals.
+            </p>
+          </div>
+        </>
+      ) : (
+        <div className="rounded-xl border border-border bg-background/70 p-4 text-sm text-muted-foreground">
+          <div className="font-medium text-foreground">{routeSummary}</div>
+          <p className="mt-1 leading-6">
+            This route uses a local authenticated bridge instead of an inline API
+            key. OpenCodex saves the selected route now and keeps host launch
+            materialization behind the desktop-controlled runtime seam.
+          </p>
+        </div>
+      )}
 
       <div className="rounded-xl border border-border bg-background/70 p-4">
         <div className="flex items-center justify-between gap-4">
@@ -373,8 +501,10 @@ export function OpenCodexBackendEditor({
       <div className="flex items-center justify-between gap-4">
         <p className="text-xs leading-5 text-muted-foreground">
           {variant === "onboarding"
-            ? "OpenCodex opens the workspace only after a valid local backend route exists."
-            : "Saving the backend applies the route immediately and restarts the hidden APP-Server."}
+            ? "OpenCodex opens the workspace only after a valid backend route has been saved."
+            : routeRequiresHost
+              ? "Saving this route applies it immediately and restarts the hidden APP-Server."
+              : "Saving this route updates the local runtime bridge choice without exposing provider login UI."}
         </p>
         <Button
           type="button"
@@ -383,7 +513,7 @@ export function OpenCodexBackendEditor({
         >
           {isApplyingConfig
             ? variant === "onboarding"
-              ? "Starting Local Backend..."
+              ? "Saving Backend Route..."
               : "Saving Backend..."
             : primaryLabel}
         </Button>

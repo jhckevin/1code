@@ -11,8 +11,13 @@ import {
 import { publicProcedure, router, type Context } from "../index"
 import { claudeRouter } from "./claude"
 import { codexRouter } from "./codex"
+import {
+  getOpenCodexBackendProviderFamily,
+  getOpenCodexBackendRouteTitle,
+  getOpenCodexBackendRuntimeKind,
+} from "../../../../shared/opencodex-backend-route"
 
-type OpenCodexBackendRouteKind = "codex" | "claude"
+type OpenCodexBackendRuntimeKind = "codex" | "claude"
 
 function getBackendConfig(): OpenCodexBackendConfigRecord | null {
   return readOpenCodexBackendConfig({
@@ -20,31 +25,12 @@ function getBackendConfig(): OpenCodexBackendConfigRecord | null {
   })
 }
 
-function getProviderTitle(
-  providerFamily: OpenCodexBackendConfigRecord["providerFamily"],
-): string {
-  switch (providerFamily) {
-    case "anthropic-compatible":
-      return "Anthropic-Compatible"
-    case "custom":
-      return "Custom Endpoint"
-    default:
-      return "OpenAI-Compatible"
-  }
-}
-
-function resolveRouteKind(
-  providerFamily: OpenCodexBackendConfigRecord["providerFamily"],
-): OpenCodexBackendRouteKind {
-  return providerFamily === "openai-compatible" ? "codex" : "claude"
-}
-
-function getCapabilities(routeKind: OpenCodexBackendRouteKind) {
-  return routeKind === "codex"
+function getCapabilities(config: OpenCodexBackendConfigRecord) {
+  return getOpenCodexBackendRuntimeKind(config) === "codex"
     ? {
         projectScope: false,
         toggleServer: false,
-        logout: true,
+        logout: config.kind === "codex-subscription",
       }
     : {
         projectScope: true,
@@ -66,13 +52,14 @@ function getActiveBackendRoute(ctx: Context) {
     return null
   }
 
-  const routeKind = resolveRouteKind(config.providerFamily)
+  const runtimeKind = getOpenCodexBackendRuntimeKind(config)
 
   return {
     config,
-    routeKind,
-    title: getProviderTitle(config.providerFamily),
-    capabilities: getCapabilities(routeKind),
+    routeKind: runtimeKind as OpenCodexBackendRuntimeKind,
+    providerFamily: getOpenCodexBackendProviderFamily(config),
+    title: getOpenCodexBackendRouteTitle(config),
+    capabilities: getCapabilities(config),
     callers: getCallers(ctx),
   }
 }
@@ -83,7 +70,7 @@ async function getRuntimeIntegration(ctx: Context) {
     return null
   }
 
-  if (route.routeKind === "codex") {
+  if (route.config.kind === "codex-subscription") {
     const integration = await route.callers.codex.getIntegration()
     return {
       state: integration.state,
@@ -94,8 +81,21 @@ async function getRuntimeIntegration(ctx: Context) {
     }
   }
 
+  if (route.config.kind === "openai-compatible-api") {
+    return {
+      state: "configured_api_key" as const,
+      isConnected: true,
+      rawOutput: null,
+      exitCode: 0,
+      canDisconnect: false,
+    }
+  }
+
   return {
-    state: "configured" as const,
+    state:
+      route.config.kind === "claude-subscription"
+        ? ("configured_subscription" as const)
+        : ("configured_api_key" as const),
     isConnected: true,
     rawOutput: null,
     exitCode: 0,
@@ -158,7 +158,7 @@ export const openCodexRouter = router({
           ? null
           : {
               routeKind: route.routeKind,
-              providerFamily: route.config.providerFamily,
+              providerFamily: route.providerFamily,
               title: route.title,
               capabilities: route.capabilities,
             },
@@ -188,7 +188,7 @@ export const openCodexRouter = router({
       backendHost: getOpenCodexBackendHostState(),
       runtime: {
         routeKind: route.routeKind,
-        providerFamily: route.config.providerFamily,
+        providerFamily: route.providerFamily,
         title: route.title,
         capabilities: route.capabilities,
       },
@@ -223,7 +223,7 @@ export const openCodexRouter = router({
           backendHost: getOpenCodexBackendHostState(),
           runtime: {
             routeKind: route.routeKind,
-            providerFamily: route.config.providerFamily,
+            providerFamily: route.providerFamily,
             title: route.title,
             capabilities: route.capabilities,
           },
@@ -249,7 +249,7 @@ export const openCodexRouter = router({
         backendHost: getOpenCodexBackendHostState(),
         runtime: {
           routeKind: route.routeKind,
-          providerFamily: route.config.providerFamily,
+          providerFamily: route.providerFamily,
           title: route.title,
           capabilities: route.capabilities,
         },

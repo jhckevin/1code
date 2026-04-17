@@ -1,6 +1,12 @@
 import { atom } from "jotai"
 import { atomWithStorage } from "jotai/utils"
 import { desktopViewAtom as _desktopViewAtom } from "../../features/agents/atoms"
+import {
+  getOpenCodexBackendRouteTemplate,
+  normalizeOpenCodexBackendRoute as normalizeSharedOpenCodexBackendRoute,
+  type OpenCodexBackendRoute,
+  type OpenCodexBackendRouteKind,
+} from "../../../shared/opencodex-backend-route"
 
 // ============================================
 // RE-EXPORT FROM FEATURES/AGENTS/ATOMS (source of truth)
@@ -203,17 +209,9 @@ export type CustomClaudeConfig = {
   baseUrl: string
 }
 
-export type OpenCodexBackendProviderFamily =
-  | "openai-compatible"
-  | "anthropic-compatible"
-  | "custom"
+export type OpenCodexBackendProviderFamily = OpenCodexBackendRouteKind
 
-export type OpenCodexBackendConfig = {
-  providerFamily: OpenCodexBackendProviderFamily
-  baseUrl: string
-  model: string
-  apiKey: string
-}
+export type OpenCodexBackendConfig = OpenCodexBackendRoute
 
 // Model profile system - support multiple configs
 export type ModelProfile = {
@@ -333,33 +331,7 @@ export function normalizeCustomClaudeConfig(
 export function normalizeOpenCodexBackendConfig(
   config: OpenCodexBackendConfig,
 ): OpenCodexBackendConfig | undefined {
-  const providerFamily = config.providerFamily
-  const baseUrl = config.baseUrl.trim()
-  const model = config.model.trim()
-  const apiKey = config.apiKey.trim()
-
-  if (!baseUrl || !model || !apiKey) return undefined
-
-  if (
-    providerFamily === "openai-compatible" &&
-    !normalizeCodexApiKey(apiKey)
-  ) {
-    return undefined
-  }
-
-  if (
-    providerFamily === "anthropic-compatible" &&
-    !(apiKey.startsWith("sk-ant-") && apiKey.length > 20)
-  ) {
-    return undefined
-  }
-
-  return {
-    providerFamily,
-    baseUrl,
-    model,
-    apiKey,
-  }
+  return normalizeSharedOpenCodexBackendRoute(config)
 }
 
 // Get active config (considering network status and auto-fallback)
@@ -780,12 +752,7 @@ export const billingMethodAtom = atomWithStorage<BillingMethod>(
 export const openCodexBackendConfigAtom =
   atomWithStorage<OpenCodexBackendConfig>(
     "opencodex:backend-config",
-    {
-      providerFamily: "openai-compatible",
-      baseUrl: "https://api.openai.com/v1",
-      model: "gpt-5.2",
-      apiKey: "",
-    },
+    getOpenCodexBackendRouteTemplate("openai-compatible-api"),
     undefined,
     { getOnInit: true },
   )

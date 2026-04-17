@@ -106,7 +106,7 @@ function AppContent() {
           normalizeOpenCodexBackendConfig(backendConfig),
         ),
         hasValidatedProject: Boolean(validatedProject),
-        isProjectsLoading,
+        isProjectsLoading: isLoadingProjects,
       }),
     [backendConfig, validatedProject, isLoadingProjects],
   )

@@ -171,7 +171,7 @@ export function AgentsModelsTab() {
     try {
       const result = await disconnectRuntimeMutation.mutateAsync()
       if (!result.success) {
-        throw new Error(result.error || "Failed to disconnect runtime")
+        throw new Error("error" in result ? result.error : "Failed to disconnect runtime")
       }
       await trpcUtils.opencodex.getBackendSurface.invalidate()
       toast.success("Runtime disconnected")
@@ -207,8 +207,9 @@ export function AgentsModelsTab() {
     : isCodexRoute
       ? runtimeIntegration?.state === "connected_chatgpt"
         ? "Connected through an inherited local session"
-        : runtimeIntegration?.state === "connected_api_key"
-          ? "Connected through the configured API route"
+        : runtimeIntegration?.state === "connected_api_key" ||
+            runtimeIntegration?.state === "configured_api_key"
+          ? "Configured through the saved API route"
           : runtimeIntegration?.state === "not_logged_in"
             ? "Waiting for a valid backend API key"
             : "Runtime status unavailable"

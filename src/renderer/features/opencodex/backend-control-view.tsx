@@ -157,7 +157,7 @@ export function BackendControlView() {
     try {
       const result = await disconnectRuntimeMutation.mutateAsync()
       if (!result.success) {
-        throw new Error(result.error || "Failed to disconnect runtime.")
+        throw new Error("error" in result ? result.error : "Failed to disconnect runtime.")
       }
       await trpcUtils.opencodex.getBackendSurface.invalidate()
       toast.success("Runtime disconnected")
@@ -295,7 +295,9 @@ export function BackendControlView() {
                   Model
                 </p>
                 <p className="mt-2 text-sm font-medium text-foreground">
-                  {backendSurface?.backendConfig?.model ?? "Not configured"}
+                  {backendSurface?.backendConfig && "model" in backendSurface.backendConfig
+                    ? backendSurface.backendConfig.model
+                    : "Not configured"}
                 </p>
               </div>
               <div className="rounded-xl border border-border/70 bg-background px-4 py-3">

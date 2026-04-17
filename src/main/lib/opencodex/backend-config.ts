@@ -1,30 +1,24 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import {
+  parseOpenCodexBackendRoute,
+  type OpenCodexBackendRoute,
+} from "../../../shared/opencodex-backend-route"
 import { resolveOpenCodexDataPaths } from "./preflight"
 
-export type OpenCodexBackendProviderFamily =
-  | "openai-compatible"
-  | "anthropic-compatible"
-  | "custom"
-
-export interface OpenCodexBackendConfigRecord {
-  providerFamily: OpenCodexBackendProviderFamily
-  baseUrl: string
-  model: string
-  apiKey: string
-}
+export type OpenCodexBackendConfigRecord = OpenCodexBackendRoute
 
 function getBackendConfigPath(userDataPath: string): string {
   return join(resolveOpenCodexDataPaths(userDataPath).stateDir, "backend-config.json")
 }
 
 function normalizeConfig(config: OpenCodexBackendConfigRecord): OpenCodexBackendConfigRecord {
-  return {
-    providerFamily: config.providerFamily,
-    baseUrl: config.baseUrl.trim(),
-    model: config.model.trim(),
-    apiKey: config.apiKey.trim(),
+  const normalized = parseOpenCodexBackendRoute(config)
+  if (!normalized) {
+    throw new Error("OpenCodex backend config is invalid")
   }
+
+  return normalized
 }
 
 export function readOpenCodexBackendConfig({
@@ -37,24 +31,8 @@ export function readOpenCodexBackendConfig({
     return null
   }
 
-  const parsed = JSON.parse(readFileSync(filePath, "utf8")) as Partial<OpenCodexBackendConfigRecord>
-  if (
-    parsed.providerFamily !== "openai-compatible" &&
-    parsed.providerFamily !== "anthropic-compatible" &&
-    parsed.providerFamily !== "custom"
-  ) {
-    return null
-  }
-
-  if (
-    typeof parsed.baseUrl !== "string" ||
-    typeof parsed.model !== "string" ||
-    typeof parsed.apiKey !== "string"
-  ) {
-    return null
-  }
-
-  return normalizeConfig(parsed as OpenCodexBackendConfigRecord)
+  const parsed = JSON.parse(readFileSync(filePath, "utf8")) as unknown
+  return parseOpenCodexBackendRoute(parsed)
 }
 
 export function saveOpenCodexBackendConfig({

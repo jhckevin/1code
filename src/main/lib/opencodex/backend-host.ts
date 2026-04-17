@@ -3,6 +3,11 @@ import { existsSync, mkdirSync } from "node:fs"
 import { resolve, join } from "node:path"
 import { createInterface } from "node:readline"
 import {
+  getOpenCodexBackendProviderFamily,
+  openCodexBackendRouteRequiresHost,
+  type OpenCodexBackendRoute,
+} from "../../../shared/opencodex-backend-route"
+import {
   readOpenCodexBackendConfig,
   type OpenCodexBackendConfigRecord,
 } from "./backend-config"
@@ -37,22 +42,26 @@ function jsonLiteral(value: unknown): string {
 
 function buildBackendOnlyScript({
   openharnessSrcPath,
-  config,
+  route,
   workspacePath,
 }: {
   openharnessSrcPath: string
-  config: OpenCodexBackendConfigRecord
+  route: OpenCodexBackendRoute
   workspacePath: string
 }): string {
-  const apiFormat =
-    config.providerFamily === "anthropic-compatible" ? "anthropic" : "openai"
+  const providerFamily = getOpenCodexBackendProviderFamily(route)
+  if (!providerFamily || route.kind === "codex-subscription" || route.kind === "claude-subscription") {
+    throw new Error(`OpenCodex backend host launch is not materialized for route kind ${route.kind}`)
+  }
+
+  const apiFormat = providerFamily === "anthropic-compatible" ? "anthropic" : "openai"
 
   return [
     "import asyncio",
     "import sys",
     `sys.path.insert(0, ${jsonLiteral(openharnessSrcPath)})`,
     "from openharness.ui.app import run_repl",
-    `asyncio.run(run_repl(backend_only=True, cwd=${jsonLiteral(workspacePath)}, model=${jsonLiteral(config.model)}, base_url=${jsonLiteral(config.baseUrl)}, api_key=${jsonLiteral(config.apiKey)}, api_format=${jsonLiteral(apiFormat)}, permission_mode='default'))`,
+    `asyncio.run(run_repl(backend_only=True, cwd=${jsonLiteral(workspacePath)}, model=${jsonLiteral(route.model)}, base_url=${jsonLiteral(route.baseUrl)}, api_key=${jsonLiteral(route.apiKey)}, api_format=${jsonLiteral(apiFormat)}, permission_mode='default'))`,
   ].join("\n")
 }
 
@@ -85,6 +94,9 @@ export function buildOpenCodexBackendHostLaunchSpec({
   if (!config) {
     throw new Error("OpenCodex backend host cannot start without a saved backend config")
   }
+  if (!openCodexBackendRouteRequiresHost(config)) {
+    throw new Error(`OpenCodex backend host launch is not materialized for route kind ${config.kind}`)
+  }
 
   const openharnessRoot = resolve(appRoot, "..", "openharness")
   const openharnessSrcPath = join(openharnessRoot, "src")
@@ -109,7 +121,7 @@ export function buildOpenCodexBackendHostLaunchSpec({
     (process.platform === "win32" ? "py" : "python3")
   const inlineScript = buildBackendOnlyScript({
     openharnessSrcPath,
-    config,
+    route: config,
     workspacePath: resolve(workspacePath),
   })
   const args =
@@ -157,6 +169,23 @@ class OpenCodexBackendHostSupervisor {
     userDataPath: string
     workspacePath: string
   }): Promise<OpenCodexBackendHostState> {
+    const route = readOpenCodexBackendConfig({ userDataPath })
+    if (!route) {
+      return this.getState()
+    }
+
+    if (!openCodexBackendRouteRequiresHost(route)) {
+      await this.stop()
+      this.state = {
+        status: "stopped",
+        pid: null,
+        startedAt: null,
+        lastError: null,
+        lastEventType: route.kind,
+      }
+      return this.getState()
+    }
+
     if (this.child && this.state.status === "ready") {
       return this.getState()
     }

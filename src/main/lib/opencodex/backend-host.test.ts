@@ -4,6 +4,7 @@ import { join } from "node:path"
 import {
   buildOpenCodexBackendHostLaunchSpec,
   resolveOpenCodexBackendHostPaths,
+  restartOpenCodexBackendHost,
 } from "./backend-host"
 import { saveOpenCodexBackendConfig } from "./backend-config"
 
@@ -28,14 +29,15 @@ describe("OpenCodex backend host supervisor", () => {
     expect(paths.logsDir.endsWith(join("opencodex", "app-server-home", "openharness-logs"))).toBe(true)
   })
 
-  test("builds a launch spec from the saved backend config and prefers utf-8 python mode", () => {
+  test("builds a launch spec from the saved api-backed route and prefers utf-8 python mode", () => {
     const userDataPath = mkdtempSync(join(process.cwd(), "tmp-opencodex-backend-host-"))
     tempDirs.push(userDataPath)
 
     saveOpenCodexBackendConfig({
       userDataPath,
       config: {
-        providerFamily: "openai-compatible",
+        kind: "openai-compatible-api",
+        authSource: "api-key",
         baseUrl: "https://api.openai.com/v1",
         model: "gpt-5.2",
         apiKey: "sk-opencodex-test",
@@ -58,6 +60,36 @@ describe("OpenCodex backend host supervisor", () => {
     expect(spec.inlineScript).toContain("\"https://api.openai.com/v1\"")
     expect(spec.inlineScript).toContain("\"sk-opencodex-test\"")
     expect(spec.env.PYTHONUTF8).toBe("1")
-    expect(spec.env.OPENHARNESS_CONFIG_DIR.includes("openharness-config")).toBe(true)
+    expect(spec.env.OPENHARNESS_CONFIG_DIR?.includes("openharness-config")).toBe(true)
+  })
+
+  test("does not try to materialize the backend host for subscription bridge routes", async () => {
+    const userDataPath = mkdtempSync(join(process.cwd(), "tmp-opencodex-backend-host-"))
+    tempDirs.push(userDataPath)
+
+    saveOpenCodexBackendConfig({
+      userDataPath,
+      config: {
+        kind: "codex-subscription",
+        authSource: "codex-local-auth",
+      },
+    })
+
+    expect(() =>
+      buildOpenCodexBackendHostLaunchSpec({
+        appRoot: process.cwd(),
+        userDataPath,
+        workspacePath: process.cwd(),
+      }),
+    ).toThrow("route kind codex-subscription")
+
+    const state = await restartOpenCodexBackendHost({
+      appRoot: process.cwd(),
+      userDataPath,
+      workspacePath: process.cwd(),
+    })
+
+    expect(state.status).toBe("stopped")
+    expect(state.lastEventType).toBe("codex-subscription")
   })
 })

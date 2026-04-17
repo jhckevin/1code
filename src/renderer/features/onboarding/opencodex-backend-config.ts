@@ -2,9 +2,15 @@ import type {
   BillingMethod,
   CodexOnboardingAuthMethod,
   CustomClaudeConfig,
-  OpenCodexBackendConfig,
-  OpenCodexBackendProviderFamily,
 } from "../../lib/atoms"
+import {
+  getOpenCodexBackendRouteTemplate,
+  type OpenCodexBackendRoute,
+  type OpenCodexBackendRouteKind,
+} from "../../../shared/opencodex-backend-route"
+
+export type OpenCodexBackendConfig = OpenCodexBackendRoute
+export type OpenCodexBackendProviderFamily = OpenCodexBackendRouteKind
 
 export type OpenCodexBackendRuntimeBridge = {
   billingMethod: BillingMethod
@@ -17,63 +23,84 @@ export type OpenCodexBackendRuntimeBridge = {
 }
 
 export function getOpenCodexBackendTemplate(
-  providerFamily: OpenCodexBackendProviderFamily,
+  kind: OpenCodexBackendRouteKind,
 ): OpenCodexBackendConfig {
-  switch (providerFamily) {
-    case "anthropic-compatible":
-      return {
-        providerFamily,
-        baseUrl: "https://api.anthropic.com",
-        model: "claude-sonnet-4-6",
-        apiKey: "",
-      }
-    case "custom":
-      return {
-        providerFamily,
-        baseUrl: "http://127.0.0.1:8000/v1",
-        model: "opencodex-default",
-        apiKey: "",
-      }
-    default:
-      return {
-        providerFamily,
-        baseUrl: "https://api.openai.com/v1",
-        model: "gpt-5.2",
-        apiKey: "",
-      }
-  }
+  return getOpenCodexBackendRouteTemplate(kind)
 }
 
 export function bridgeOpenCodexBackendConfig(
   config: OpenCodexBackendConfig,
 ): OpenCodexBackendRuntimeBridge {
-  if (config.providerFamily === "openai-compatible") {
-    return {
-      billingMethod: "codex-api-key",
-      customClaudeConfig: {
-        model: "",
-        token: "",
-        baseUrl: "",
-      },
-      apiKeyOnboardingCompleted: false,
-      codexOnboardingCompleted: true,
-      codexOnboardingAuthMethod: "api_key",
-      codexApiKey: config.apiKey,
-      lastSelectedAgentId: "codex",
-    }
-  }
-
-  return {
-    billingMethod: "custom-model",
-    customClaudeConfig: {
-      model: config.model,
-      token: config.apiKey,
-      baseUrl: config.baseUrl,
-    },
-    apiKeyOnboardingCompleted: true,
-    codexOnboardingCompleted: false,
-    codexOnboardingAuthMethod: "api_key",
-    codexApiKey: "",
-    lastSelectedAgentId: "claude-code",
+  switch (config.kind) {
+    case "codex-subscription":
+      return {
+        billingMethod: "codex-subscription",
+        customClaudeConfig: {
+          model: "",
+          token: "",
+          baseUrl: "",
+        },
+        apiKeyOnboardingCompleted: false,
+        codexOnboardingCompleted: true,
+        codexOnboardingAuthMethod: "chatgpt",
+        codexApiKey: "",
+        lastSelectedAgentId: "codex",
+      }
+    case "openai-compatible-api":
+      return {
+        billingMethod: "codex-api-key",
+        customClaudeConfig: {
+          model: "",
+          token: "",
+          baseUrl: "",
+        },
+        apiKeyOnboardingCompleted: false,
+        codexOnboardingCompleted: true,
+        codexOnboardingAuthMethod: "api_key",
+        codexApiKey: config.apiKey,
+        lastSelectedAgentId: "codex",
+      }
+    case "anthropic-compatible-api":
+      return {
+        billingMethod: "api-key",
+        customClaudeConfig: {
+          model: config.model,
+          token: config.apiKey,
+          baseUrl: config.baseUrl,
+        },
+        apiKeyOnboardingCompleted: true,
+        codexOnboardingCompleted: false,
+        codexOnboardingAuthMethod: "api_key",
+        codexApiKey: "",
+        lastSelectedAgentId: "claude-code",
+      }
+    case "claude-subscription":
+      return {
+        billingMethod: "claude-subscription",
+        customClaudeConfig: {
+          model: "",
+          token: "",
+          baseUrl: "",
+        },
+        apiKeyOnboardingCompleted: false,
+        codexOnboardingCompleted: false,
+        codexOnboardingAuthMethod: "api_key",
+        codexApiKey: "",
+        lastSelectedAgentId: "claude-code",
+      }
+    case "custom-endpoint":
+      return {
+        billingMethod: "custom-model",
+        customClaudeConfig: {
+          model: config.model,
+          token: config.apiKey,
+          baseUrl: config.baseUrl,
+        },
+        apiKeyOnboardingCompleted: true,
+        codexOnboardingCompleted: false,
+        codexOnboardingAuthMethod: "api_key",
+        codexApiKey: "",
+        lastSelectedAgentId: "claude-code",
+      }
   }
 }

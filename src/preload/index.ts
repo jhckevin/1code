@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron"
+import type { OpenCodexBackendRoute } from "../shared/opencodex-backend-route"
 import { exposeElectronTRPC } from "trpc-electron/main"
 
 // Only initialize Sentry in production to avoid IPC errors in dev mode
@@ -244,12 +245,7 @@ export interface OpenCodexLocalProfile {
   identityLabel: string
 }
 
-export interface OpenCodexBackendConfigInput {
-  providerFamily: "openai-compatible" | "anthropic-compatible" | "custom"
-  baseUrl: string
-  model: string
-  apiKey: string
-}
+export type OpenCodexBackendConfigInput = OpenCodexBackendRoute
 
 export interface OpenCodexBackendHostState {
   status: "stopped" | "starting" | "ready" | "error"

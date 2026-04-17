@@ -43,13 +43,13 @@ import {
   selectedProjectAtom,
   getNextMode,
   type AgentMode,
+  type SavedRepo,
 } from "../atoms"
 import { defaultAgentModeAtom } from "../../../lib/atoms"
 import { ProjectSelector } from "../components/project-selector"
 import { WorkModeSelector } from "../components/work-mode-selector"
 // import { selectedTeamIdAtom } from "@/lib/atoms/team"
 import { atom } from "jotai"
-const selectedTeamIdAtom = atom<string | null>(null)
 import {
   agentsSettingsDialogOpenAtom,
   agentsSettingsDialogActiveTabAtom,
@@ -72,6 +72,7 @@ import {
 // Desktop uses real tRPC
 import { toast } from "sonner"
 import { trpc } from "../../../lib/trpc"
+
 import {
   AgentsSlashCommand,
   COMMAND_PROMPTS,
@@ -126,6 +127,12 @@ import {
   type CodexThinkingLevel,
 } from "../lib/models"
 import { getOpenCodexProviderLabel } from "../lib/opencodex-runtime"
+
+type DesktopRepo = NonNullable<SavedRepo> & {
+  pushed_at?: string | null
+}
+
+const selectedTeamIdAtom = atom<string | null>(null)
 // import type { PlanType } from "@/lib/config/subscription-plans"
 type PlanType = string
 
@@ -257,10 +264,16 @@ export function NewChatForm({
     [backendConfig],
   )
   const isClaudeConnected =
-    Boolean(normalizedBackendConfig) ||
+    normalizedBackendConfig?.kind === "claude-subscription" ||
+    normalizedBackendConfig?.kind === "anthropic-compatible-api" ||
+    normalizedBackendConfig?.kind === "custom-endpoint" ||
     anthropicOnboardingCompleted ||
     apiKeyOnboardingCompleted ||
     hasCustomClaudeConfig
+  const isCodexConnected =
+    normalizedBackendConfig?.kind === "codex-subscription" ||
+    normalizedBackendConfig?.kind === "openai-compatible-api" ||
+    codexOnboardingCompleted
   const setSettingsDialogOpen = useSetAtom(agentsSettingsDialogOpenAtom)
   const setSettingsActiveTab = useSetAtom(agentsSettingsDialogActiveTabAtom)
   const setJustCreatedIds = useSetAtom(justCreatedIdsAtom)
@@ -722,7 +735,7 @@ export function NewChatForm({
 
   // Fetch repos from team
   // Desktop: no remote repos, we use local projects
-  const reposData = { repositories: [] }
+  const reposData: { repositories: DesktopRepo[] } = { repositories: [] }
   const isLoadingRepos = false
 
   // Memoize repos arrays to prevent useEffect from running on every keystroke
@@ -1937,7 +1950,7 @@ export function NewChatForm({
                             },
                             selectedThinking: selectedCodexThinking,
                             onSelectThinking: setLastSelectedCodexThinking,
-                            isConnected: codexOnboardingCompleted,
+                            isConnected: isCodexConnected,
                           }}
                         />
                       </div>

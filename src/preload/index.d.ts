@@ -1,3 +1,4 @@
+import type { OpenCodexBackendRoute } from "../shared/opencodex-backend-route"
 export type OpenCodexStartupState =
   | { status: "ready" }
   | {
@@ -30,12 +31,7 @@ export interface OpenCodexLocalProfile {
   identityLabel: string
 }
 
-export interface OpenCodexBackendConfigInput {
-  providerFamily: "openai-compatible" | "anthropic-compatible" | "custom"
-  baseUrl: string
-  model: string
-  apiKey: string
-}
+export type OpenCodexBackendConfigInput = OpenCodexBackendRoute
 
 export interface OpenCodexBackendHostState {
   status: "stopped" | "starting" | "ready" | "error"

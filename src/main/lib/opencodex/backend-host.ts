@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process"
-import { existsSync, mkdirSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
 import { resolve, join } from "node:path"
 import { createInterface } from "node:readline"
 import {
@@ -36,11 +37,45 @@ export interface OpenCodexBackendHostState {
   lastEventType: string | null
 }
 
+type OpenHarnessExternalBinding = {
+  provider: string
+  source_path: string
+  source_kind: string
+  managed_by: string
+  profile_label: string
+}
+
 function jsonLiteral(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function buildBackendOnlyScript({
+function resolveOpenHarnessActiveProfile(route: OpenCodexBackendRoute): string {
+  switch (route.kind) {
+    case "codex-subscription":
+      return "codex"
+    case "claude-subscription":
+      return "claude-subscription"
+    case "anthropic-compatible-api":
+      return "claude-api"
+    case "custom-endpoint":
+      return route.providerFamily === "anthropic-compatible"
+        ? "claude-api"
+        : "openai-compatible"
+    case "openai-compatible-api":
+    default:
+      return "openai-compatible"
+  }
+}
+
+function resolveOpenHarnessApiFormat(route: OpenCodexBackendRoute): "openai" | "anthropic" | null {
+  const providerFamily = getOpenCodexBackendProviderFamily(route)
+  if (!providerFamily) {
+    return null
+  }
+  return providerFamily === "anthropic-compatible" ? "anthropic" : "openai"
+}
+
+function buildOpenHarnessBackendHostScript({
   openharnessSrcPath,
   route,
   workspacePath,
@@ -49,20 +84,110 @@ function buildBackendOnlyScript({
   route: OpenCodexBackendRoute
   workspacePath: string
 }): string {
-  const providerFamily = getOpenCodexBackendProviderFamily(route)
-  if (!providerFamily || route.kind === "codex-subscription" || route.kind === "claude-subscription") {
-    throw new Error(`OpenCodex backend host launch is not materialized for route kind ${route.kind}`)
-  }
+  const activeProfile = resolveOpenHarnessActiveProfile(route)
+  const args = [
+    `cwd=${jsonLiteral(workspacePath)}`,
+    `active_profile=${jsonLiteral(activeProfile)}`,
+    "permission_mode='default'",
+  ]
 
-  const apiFormat = providerFamily === "anthropic-compatible" ? "anthropic" : "openai"
+  if (route.kind !== "codex-subscription" && route.kind !== "claude-subscription") {
+    args.push(`model=${jsonLiteral(route.model)}`)
+    args.push(`base_url=${jsonLiteral(route.baseUrl)}`)
+    args.push(`api_key=${jsonLiteral(route.apiKey)}`)
+    const apiFormat = resolveOpenHarnessApiFormat(route)
+    if (apiFormat) {
+      args.push(`api_format=${jsonLiteral(apiFormat)}`)
+    }
+  }
 
   return [
     "import asyncio",
     "import sys",
     `sys.path.insert(0, ${jsonLiteral(openharnessSrcPath)})`,
-    "from openharness.ui.app import run_repl",
-    `asyncio.run(run_repl(backend_only=True, cwd=${jsonLiteral(workspacePath)}, model=${jsonLiteral(route.model)}, base_url=${jsonLiteral(route.baseUrl)}, api_key=${jsonLiteral(route.apiKey)}, api_format=${jsonLiteral(apiFormat)}, permission_mode='default'))`,
+    "from openharness.ui.backend_host import run_backend_host",
+    `asyncio.run(run_backend_host(${args.join(", ")}))`,
   ].join("\n")
+}
+
+function resolveExternalBinding(
+  route: OpenCodexBackendRoute,
+  env: NodeJS.ProcessEnv,
+): OpenHarnessExternalBinding | null {
+  if (route.kind === "codex-subscription") {
+    const codexHome = (env.CODEX_HOME || join(homedir(), ".codex")).trim()
+    return {
+      provider: "openai_codex",
+      source_path: join(codexHome, "auth.json"),
+      source_kind: "codex_auth_json",
+      managed_by: "codex-cli",
+      profile_label: "Codex CLI",
+    }
+  }
+
+  if (route.kind !== "claude-subscription") {
+    return null
+  }
+
+  const configuredDir = (env.CLAUDE_CONFIG_DIR || "").trim()
+  if (configuredDir) {
+    return {
+      provider: "anthropic_claude",
+      source_path: join(configuredDir, ".credentials.json"),
+      source_kind: "claude_credentials_json",
+      managed_by: "claude-cli",
+      profile_label: "Claude CLI",
+    }
+  }
+
+  if (process.platform === "darwin") {
+    return {
+      provider: "anthropic_claude",
+      source_path: "keychain:Claude Code-credentials",
+      source_kind: "claude_credentials_keychain",
+      managed_by: "claude-cli",
+      profile_label: "Claude CLI",
+    }
+  }
+
+  const claudeHome = (env.CLAUDE_HOME || join(homedir(), ".claude")).trim()
+  return {
+    provider: "anthropic_claude",
+    source_path: join(claudeHome, ".credentials.json"),
+    source_kind: "claude_credentials_json",
+    managed_by: "claude-cli",
+    profile_label: "Claude CLI",
+  }
+}
+
+function materializeExternalBinding({
+  configDir,
+  route,
+  env,
+}: {
+  configDir: string
+  route: OpenCodexBackendRoute
+  env: NodeJS.ProcessEnv
+}): void {
+  const binding = resolveExternalBinding(route, env)
+  if (!binding) {
+    return
+  }
+
+  const credentialsPath = join(configDir, "credentials.json")
+  let payload: Record<string, unknown> = {}
+  if (existsSync(credentialsPath)) {
+    payload = JSON.parse(readFileSync(credentialsPath, "utf8")) as Record<string, unknown>
+  }
+
+  const providerEntry =
+    typeof payload[binding.provider] === "object" && payload[binding.provider] !== null
+      ? { ...(payload[binding.provider] as Record<string, unknown>) }
+      : {}
+
+  providerEntry.external_binding = binding
+  payload[binding.provider] = providerEntry
+  writeFileSync(credentialsPath, JSON.stringify(payload, null, 2), "utf8")
 }
 
 export function resolveOpenCodexBackendHostPaths({
@@ -115,11 +240,16 @@ export function buildOpenCodexBackendHostLaunchSpec({
   for (const dirPath of [ownedPaths.rootDir, ownedPaths.configDir, ownedPaths.dataDir, ownedPaths.logsDir]) {
     mkdirSync(dirPath, { recursive: true })
   }
+  materializeExternalBinding({
+    configDir: ownedPaths.configDir,
+    route: config,
+    env,
+  })
 
   const command =
     env.OPENCODEX_OPENHARNESS_PYTHON ||
     (process.platform === "win32" ? "py" : "python3")
-  const inlineScript = buildBackendOnlyScript({
+  const inlineScript = buildOpenHarnessBackendHostScript({
     openharnessSrcPath,
     route: config,
     workspacePath: resolve(workspacePath),
@@ -216,7 +346,12 @@ class OpenCodexBackendHostSupervisor {
 
     const readyPromise = new Promise<OpenCodexBackendHostState>((resolveState) => {
       const stdoutReader = createInterface({ input: this.child!.stdout })
+      let settled = false
       const settleReady = (next: OpenCodexBackendHostState) => {
+        if (settled) {
+          return
+        }
+        settled = true
         stdoutReader.close()
         resolveState(next)
       }
@@ -247,6 +382,24 @@ class OpenCodexBackendHostSupervisor {
           this.state.status = "error"
           this.state.lastError =
             error instanceof Error ? error.message : "Failed to parse OpenHarness backend host output"
+          settleReady(this.getState())
+        }
+      })
+
+      this.child!.once("error", (error) => {
+        this.state.status = "error"
+        this.state.lastError = error.message
+        settleReady(this.getState())
+      })
+
+      this.child!.once("exit", (code, signal) => {
+        if (this.state.status === "starting") {
+          this.state.status = code === 0 ? "stopped" : "error"
+          this.state.pid = null
+          this.state.lastError =
+            code === 0
+              ? this.state.lastError
+              : this.state.lastError || `OpenHarness backend host exited with code ${code ?? "null"} (${signal ?? "no-signal"})`
           settleReady(this.getState())
         }
       })

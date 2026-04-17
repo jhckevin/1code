@@ -63,7 +63,7 @@ describe("OpenCodex backend route helpers", () => {
     })
   })
 
-  test("rejects invalid api-backed routes and identifies which routes need host launch materialization", () => {
+  test("rejects invalid api-backed routes and identifies every approved route as host-backed", () => {
     expect(
       normalizeOpenCodexBackendRoute({
         kind: "anthropic-compatible-api",
@@ -79,7 +79,7 @@ describe("OpenCodex backend route helpers", () => {
         kind: "codex-subscription",
         authSource: "codex-local-auth",
       }),
-    ).toBe(false)
+    ).toBe(true)
 
     expect(
       openCodexBackendRouteRequiresHost({

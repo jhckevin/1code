@@ -302,13 +302,9 @@ export function getOpenCodexBackendRuntimeKind(
 }
 
 export function openCodexBackendRouteRequiresHost(
-  route: OpenCodexBackendRoute,
+  _route: OpenCodexBackendRoute,
 ): boolean {
-  return (
-    route.kind === "openai-compatible-api" ||
-    route.kind === "anthropic-compatible-api" ||
-    route.kind === "custom-endpoint"
-  )
+  return true
 }
 
 export type { LegacyOpenCodexBackendConfig }

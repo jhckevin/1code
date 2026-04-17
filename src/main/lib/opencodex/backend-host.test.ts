@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import {
   buildOpenCodexBackendHostLaunchSpec,
@@ -55,7 +55,8 @@ describe("OpenCodex backend host supervisor", () => {
     expect(spec.command).toBe("py")
     expect(spec.args).toContain("-3")
     expect(spec.args).toContain("-c")
-    expect(spec.inlineScript).toContain("run_repl")
+    expect(spec.inlineScript).toContain("run_backend_host")
+    expect(spec.inlineScript).toContain('active_profile="openai-compatible"')
     expect(spec.inlineScript).toContain("\"gpt-5.2\"")
     expect(spec.inlineScript).toContain("\"https://api.openai.com/v1\"")
     expect(spec.inlineScript).toContain("\"sk-opencodex-test\"")
@@ -63,7 +64,7 @@ describe("OpenCodex backend host supervisor", () => {
     expect(spec.env.OPENHARNESS_CONFIG_DIR?.includes("openharness-config")).toBe(true)
   })
 
-  test("does not try to materialize the backend host for subscription bridge routes", async () => {
+  test("builds a launch spec for the codex subscription route using the codex profile bridge", () => {
     const userDataPath = mkdtempSync(join(process.cwd(), "tmp-opencodex-backend-host-"))
     tempDirs.push(userDataPath)
 
@@ -75,21 +76,100 @@ describe("OpenCodex backend host supervisor", () => {
       },
     })
 
-    expect(() =>
-      buildOpenCodexBackendHostLaunchSpec({
-        appRoot: process.cwd(),
-        userDataPath,
-        workspacePath: process.cwd(),
-      }),
-    ).toThrow("route kind codex-subscription")
-
-    const state = await restartOpenCodexBackendHost({
+    const spec = buildOpenCodexBackendHostLaunchSpec({
       appRoot: process.cwd(),
       userDataPath,
       workspacePath: process.cwd(),
     })
 
-    expect(state.status).toBe("stopped")
-    expect(state.lastEventType).toBe("codex-subscription")
+    const credentialsPath = spec.env.OPENHARNESS_CONFIG_DIR
+      ? join(spec.env.OPENHARNESS_CONFIG_DIR, "credentials.json")
+      : ""
+
+    expect(spec.inlineScript).toContain("run_backend_host")
+    expect(spec.inlineScript).toContain('active_profile="codex"')
+    expect(spec.inlineScript).not.toContain('"sk-')
+    expect(spec.inlineScript).not.toContain('"https://')
+    expect(spec.inlineScript).not.toContain("run_repl")
+    expect(credentialsPath.length > 0 && existsSync(credentialsPath)).toBe(true)
+    expect(JSON.parse(readFileSync(credentialsPath, "utf8"))).toMatchObject({
+      openai_codex: {
+        external_binding: {
+          provider: "openai_codex",
+          source_kind: "codex_auth_json",
+          managed_by: "codex-cli",
+        },
+      },
+    })
+  })
+
+  test("builds a launch spec for the claude subscription route using the claude profile bridge", () => {
+    const userDataPath = mkdtempSync(join(process.cwd(), "tmp-opencodex-backend-host-"))
+    tempDirs.push(userDataPath)
+
+    saveOpenCodexBackendConfig({
+      userDataPath,
+      config: {
+        kind: "claude-subscription",
+        authSource: "claude-local-auth",
+      },
+    })
+
+    const spec = buildOpenCodexBackendHostLaunchSpec({
+      appRoot: process.cwd(),
+      userDataPath,
+      workspacePath: process.cwd(),
+    })
+
+    const credentialsPath = spec.env.OPENHARNESS_CONFIG_DIR
+      ? join(spec.env.OPENHARNESS_CONFIG_DIR, "credentials.json")
+      : ""
+
+    expect(spec.inlineScript).toContain("run_backend_host")
+    expect(spec.inlineScript).toContain('active_profile="claude-subscription"')
+    expect(spec.inlineScript).not.toContain('"sk-ant-')
+    expect(spec.inlineScript).not.toContain("run_repl")
+    expect(credentialsPath.length > 0 && existsSync(credentialsPath)).toBe(true)
+    expect(JSON.parse(readFileSync(credentialsPath, "utf8"))).toMatchObject({
+      anthropic_claude: {
+        external_binding: {
+          provider: "anthropic_claude",
+          managed_by: "claude-cli",
+        },
+      },
+    })
+  })
+
+  test("reports backend process launch failures through host state", async () => {
+    const userDataPath = mkdtempSync(join(process.cwd(), "tmp-opencodex-backend-host-"))
+    tempDirs.push(userDataPath)
+
+    saveOpenCodexBackendConfig({
+      userDataPath,
+      config: {
+        kind: "codex-subscription",
+        authSource: "codex-local-auth",
+      },
+    })
+
+    const previousPython = process.env.OPENCODEX_OPENHARNESS_PYTHON
+    process.env.OPENCODEX_OPENHARNESS_PYTHON = "opencodex-python-does-not-exist"
+
+    try {
+      const state = await restartOpenCodexBackendHost({
+        appRoot: process.cwd(),
+        userDataPath,
+        workspacePath: process.cwd(),
+      })
+
+      expect(state.status).toBe("error")
+      expect(state.lastError).toContain("opencodex-python-does-not-exist")
+    } finally {
+      if (previousPython === undefined) {
+        delete process.env.OPENCODEX_OPENHARNESS_PYTHON
+      } else {
+        process.env.OPENCODEX_OPENHARNESS_PYTHON = previousPython
+      }
+    }
   })
 })
